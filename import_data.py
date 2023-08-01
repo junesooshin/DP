@@ -63,55 +63,54 @@ def select_data(city, start_date, end_date, granularity):
 
     return df3
 
-def load_data(df, meter_range, num_days):
-    """
-    Function to return load, mass flow, temperature of selected df.
-    If there are missing values, the meter range should be changed.
-    Input: df, meter range, number of days
-    Output: load df, mf df, t df
-    """
-    #Select meters
-    meters = df.heat_meter_serial_number.unique()[meter_range]
-    #Populate meter data
-    meter_data = {}
-    for i in range(0,len(meter_range)):
-        df_select = df[df.heat_meter_serial_number == meters[i]]
-        if df_select.shape[0] < num_days: #if there is missing days, change the range
-            print(f'Selected meter {meters[i]} has missing data. Change the range of meter selection')
-            break
-        elif df_select.shape[0] >= num_days: #if days are repeated, use average 
-            df_select_resample = df_select.resample('D', on='reading_datetime').mean()
-            meter_data[i] = {'load': df_select_resample.cumulative_heat_energy.values, 
-                            'supply_temp': df_select_resample.hot_water_supply_temperature.values,
-                            'return_temp': df_select_resample.hot_water_return_temperature.values,
-                            'cum_water_volume': df_select_resample.cumulative_hot_water_volume.values,
-                            'cum_water_mass': df_select_resample.cumulative_hot_water_volume.values*1000}
-    
-    return meter_data
+def fill_outliers(array, lim):
+    df = pd.DataFrame(array)
+    df1 = df.copy()
+    outliers = np.abs(df1.diff()) > lim
+    df1[outliers] = np.nan
+    df1_filled = df1.interpolate(method='linear',limit=6, limit_direction='both')
+    return df1_filled.values.flatten()
 
-def plot_meter_data(meter_data, meter_no, days):
-    # create figure and axes
-    fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, sharex=True)
+def temp_loss(meter_data, l, R_in, meter_no, t, meter_avg_temp):
+    T_soil = 10
+    r_out = 110/(2*1000)
+    Cp = 1.1622 # 4184 J/kg.K = 1.1622 Wh/kg.K
+    k = 0.025 # W/(m*K) #https://smartenergysystems.eu/wp-content/uploads/2019/04/thrid_-_oliver_martin-du_pan.pdf
+    T_meter = meter_avg_temp[meter_no][t-1]
+    ΔT = T_meter - T_soil # C
+    L = l[meter_no] # m 
+    r_in = R_in[meter_no] # m
 
-    #First axis
-    x = [i for i in range(0,days)] 
-    ax1.plot(x, meter_data[meter_no]['load'], label='Load', marker='o', markersize=3)
-    ax1.set_ylabel('Load over day [MWh]')
-    ax1.set_title(f'Meter {meter_no}')
-    ax1.legend(fontsize=7)
+    Q = 2*np.pi*L*k*(ΔT)/np.log(r_out/r_in) # W
 
-    #Second axis
-    ax2.plot(x, meter_data[meter_no]['supply_temp'], label='supply temp', marker='o', markersize=3)
-    ax2.plot(x, meter_data[meter_no]['return_temp'], label='return temp', marker='o', markersize=3)
-    ax2.plot(x, meter_data[meter_no]['supply_temp']-meter_data[meter_no]['return_temp'], label='diff', marker='o', markersize=3)
-    ax2.set_ylabel('Temperature [C]')
-    ax2.legend(fontsize=7)
+    mf = (meter_data[meter_no]['cumulative_hot_water_volume'].values[t]-meter_data[meter_no]['cumulative_hot_water_volume'].values[t-1])*1000 #kg/h
+    T_node = (Q / (Cp * mf)) + T_meter
 
-    #Third axis
-    ax3.plot(x, meter_data[meter_no]['cum_water_mass'], label='mf', marker='o', markersize=3)
-    ax3.set_ylabel('Mass flow [kg/day]')
-    ax3.set_xlabel('Days')
-    ax3.legend(fontsize=7)
+    return Q, T_meter, T_node
 
-    plt.plot()
+def calculate_sensitivity(data):
+  """Calculates the sensitivity of a time-series data.
 
+  Args:
+    data: A list of numbers representing the time-series data.
+
+  Returns:
+    The sensitivity of the time-series data.
+  """
+
+  max_diff = 0
+  for i in range(len(data)):
+    for j in range(i + 1, len(data)):
+      diff = abs(data[i] - data[j])
+      if diff > max_diff:
+        max_diff = diff
+
+  return max_diff
+
+def fill_outliers(array, lim):
+    df = pd.DataFrame(array)
+    df1 = df.copy()
+    outliers = np.abs(df1.diff()) > lim
+    df1[outliers] = np.nan
+    df1_filled = df1.interpolate(method='linear',limit=6, limit_direction='both')
+    return df1_filled.values.flatten()
